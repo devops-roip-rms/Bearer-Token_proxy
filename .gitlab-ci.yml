@@ -1,0 +1,130 @@
+stages:
+  - test
+  - package
+
+# Route Docker Hub images through GitLab's Dependency Proxy. The proxy must be
+# enabled for the GitLab group; a self-hosted installation may instead point
+# these image references at its approved registry mirror.
+variables:
+  DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}
+
+# Native fallback compatibility: the server currently has Python 3.6.8.
+test:python36:
+  stage: test
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.6.15-slim-buster
+  script:
+    - python3 -m unittest discover -s tests -v
+
+# Docker production runtime compatibility.
+test:python311:
+  stage: test
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.11-slim-bookworm
+  script:
+    - python3 -m unittest discover -s tests -v
+
+# Produces an offline-loadable Docker image archive.
+# The GitLab Runner Docker executor must be configured with privileged = true
+# for Docker-in-Docker; that setting cannot be enabled by this project file.
+package:docker-offline:
+  stage: package
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:27.5.1-cli
+  services:
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:27.5.1-dind
+      alias: docker
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    IMAGE_NAME: storagegrid-usage-proxy
+  needs:
+    - test:python36
+    - test:python311
+
+  before_script:
+    - docker info
+
+    - |
+      if [ -z "${CI_DEPENDENCY_PROXY_SERVER:-}" ] || [ -z "${CI_DEPENDENCY_PROXY_USER:-}" ] || [ -z "${CI_DEPENDENCY_PROXY_PASSWORD:-}" ]; then
+        echo "ERROR: GitLab Dependency Proxy credentials are unavailable"
+        exit 1
+      fi
+
+      echo "$CI_DEPENDENCY_PROXY_PASSWORD" |
+        docker login "$CI_DEPENDENCY_PROXY_SERVER" \
+          --username "$CI_DEPENDENCY_PROXY_USER" \
+          --password-stdin
+
+    - |
+      BASE_IMAGE="${DOCKER_PROXY_PREFIX}/python:3.11-slim-bookworm"
+
+      for attempt in 1 2 3 4 5; do
+        echo "Docker pull attempt $attempt/5"
+
+        if docker pull "$BASE_IMAGE"; then
+          break
+        fi
+
+        if [ "$attempt" -eq 5 ]; then
+          echo "ERROR: Unable to pull $BASE_IMAGE after 5 attempts"
+          exit 1
+        fi
+
+        sleep $((attempt * 15))
+      done
+
+  script:
+    - |
+      if [ ! -f TAG ]; then
+        echo "ERROR: TAG file does not exist"
+        exit 1
+      fi
+
+      VERSION="$(tr -d '[:space:]' < TAG)"
+
+      if [ -z "$VERSION" ]; then
+        echo "ERROR: TAG file is empty"
+        exit 1
+      fi
+
+      if ! printf '%s' "$VERSION" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+        echo "ERROR: Invalid Docker image tag: $VERSION"
+        exit 1
+      fi
+
+      TAR_FILE="storagegrid-usage-proxy_${VERSION}.tar"
+      BASE_IMAGE="${DOCKER_PROXY_PREFIX}/python:3.11-slim-bookworm"
+
+      echo "Building ${IMAGE_NAME}:${VERSION}"
+
+      docker build \
+        --build-arg BASE_IMAGE="$BASE_IMAGE" \
+        --build-arg APP_VERSION="$VERSION" \
+        --label org.opencontainers.image.revision="$CI_COMMIT_SHA" \
+        --label org.opencontainers.image.source="$CI_PROJECT_URL" \
+        -t "${IMAGE_NAME}:${VERSION}" \
+        -t "${IMAGE_NAME}:latest" \
+        .
+
+      docker save -o "$TAR_FILE" \
+        "${IMAGE_NAME}:${VERSION}" \
+        "${IMAGE_NAME}:latest"
+
+      sha256sum "$TAR_FILE" > "${TAR_FILE}.sha256"
+      printf '%s\n' "$VERSION" > IMAGE_VERSION.txt
+
+  artifacts:
+    name: "storagegrid-usage-proxy-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
+    expire_in: 30 days
+    paths:
+      - storagegrid-usage-proxy_*.tar
+      - storagegrid-usage-proxy_*.tar.sha256
+      - IMAGE_VERSION.txt
+      - compose.yml
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - TAG
