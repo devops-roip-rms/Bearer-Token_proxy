@@ -1,7 +1,7 @@
 services:
-  storagegrid-usage-proxy:
-    image: storagegrid-usage-proxy:latest
-    container_name: storagegrid-usage-proxy
+  bearer-token-api-proxy:
+    image: bearer-token-api-proxy:latest
+    container_name: bearer-token-api-proxy
     restart: unless-stopped
 
     ports:
@@ -9,6 +9,7 @@ services:
 
     volumes:
       - ./config/proxy.env:/app/config/proxy.env:ro
+      - ./config/proxy.json:/app/config/proxy.json:ro
       - ./certs:/app/certs:ro
 
     read_only: true

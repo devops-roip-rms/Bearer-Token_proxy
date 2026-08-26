@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "base_url": "${UPSTREAM_BASE_URL}",
+    "route_prefix": "/proxy",
+    "allowed_methods": ["GET"],
+    "allowed_paths": ["/api/*"],
+    "tls_verify": true,
+    "ca_bundle": "${UPSTREAM_CA_BUNDLE}",
+    "request_headers": ["Accept", "Content-Type"],
+    "response_headers": ["Content-Type", "ETag", "Last-Modified", "Content-Disposition", "Retry-After"]
+  },
+  "auth": {
+    "base_url": "${AUTH_BASE_URL}",
+    "tls_verify": true,
+    "ca_bundle": "${AUTH_CA_BUNDLE}",
+    "request": {
+      "method": "POST",
+      "path": "/api/login",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "body_type": "json",
+      "body": {
+        "username": "${AUTH_USERNAME}",
+        "password": "${AUTH_PASSWORD}"
+      }
+    },
+    "token": {
+      "source": "json",
+      "json_pointer": "/access_token",
+      "header_name": "Authorization",
+      "scheme": "Bearer"
+    },
+    "validation": {
+      "enabled": true,
+      "method": "GET",
+      "path": "/api/me",
+      "expected_statuses": [200]
+    }
+  },
+  "server": {
+    "bind_host": "${PROXY_BIND_HOST}",
+    "bind_port": "${PROXY_PORT}",
+    "proxy_api_key": "${PROXY_API_KEY}",
+    "proxy_key_header": "X-Bearer-Proxy-Key",
+    "allow_unauthenticated_nonloopback": "${ALLOW_UNAUTHENTICATED_NONLOOPBACK}"
+  },
+  "runtime": {
+    "http_timeout_seconds": "${HTTP_TIMEOUT_SECONDS}",
+    "max_request_bytes": "${MAX_REQUEST_BYTES}",
+    "max_response_bytes": "${MAX_RESPONSE_BYTES}",
+    "fallback_refresh_interval_seconds": "${TOKEN_REFRESH_SECONDS}",
+    "refresh_retry_seconds": "${REFRESH_RETRY_SECONDS}",
+    "refresh_margin_seconds": "${REFRESH_MARGIN_SECONDS}",
+    "stale_token_warning_seconds": "${STALE_TOKEN_WARNING_SECONDS}",
+    "log_level": "${LOG_LEVEL}"
+  }
+}

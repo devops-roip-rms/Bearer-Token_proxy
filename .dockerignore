@@ -28,6 +28,7 @@ IMAGE_VERSION.txt
 
 # Never bake runtime credentials or private CA material into the image.
 config/proxy.env
+config/proxy.json
 certs/*
 !certs/.keep
 

@@ -17,6 +17,7 @@ echo "python=$(python3 --version 2>&1)"
 mkdir -p "$ROOT/logs" "$ROOT/runtime" "$ROOT/certs"
 chmod +x "$ROOT"/scripts/*.sh
 chmod 600 "$ROOT/config/proxy.env" 2>/dev/null || true
+chmod 600 "$ROOT/config/proxy.json" 2>/dev/null || true
 
 # Verify shell syntax before doing anything network-related.
 for script in "$ROOT"/scripts/*.sh; do
@@ -25,4 +26,9 @@ done
 
 echo "scripts_ok=yes"
 echo "setup_ok=yes"
-echo "Next: edit config/proxy.env if needed, then run ./scripts/check-config.sh"
+if [ ! -f "$ROOT/config/proxy.json" ]; then
+    echo "config_json_missing=yes"
+    echo "Next: copy an example proxy.json into config/proxy.json, then run ./scripts/check-config.sh"
+else
+    echo "Next: edit config/proxy.env and config/proxy.json if needed, then run ./scripts/check-config.sh"
+fi

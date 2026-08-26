@@ -8,7 +8,7 @@ stages:
 variables:
   DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}
 
-# Native fallback compatibility: the server currently has Python 3.6.8.
+# Native fallback compatibility for Python 3.6 deployments.
 test:python36:
   stage: test
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.6.15-slim-buster
@@ -36,7 +36,7 @@ package:docker-offline:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     DOCKER_DRIVER: overlay2
-    IMAGE_NAME: storagegrid-usage-proxy
+    IMAGE_NAME: bearer-token-api-proxy
   needs:
     - test:python36
     - test:python311
@@ -92,7 +92,7 @@ package:docker-offline:
         exit 1
       fi
 
-      TAR_FILE="storagegrid-usage-proxy_${VERSION}.tar"
+      TAR_FILE="bearer-token-api-proxy_${VERSION}.tar"
       BASE_IMAGE="${DOCKER_PROXY_PREFIX}/python:3.11-slim-bookworm"
 
       echo "Building ${IMAGE_NAME}:${VERSION}"
@@ -114,11 +114,11 @@ package:docker-offline:
       printf '%s\n' "$VERSION" > IMAGE_VERSION.txt
 
   artifacts:
-    name: "storagegrid-usage-proxy-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
+    name: "bearer-token-api-proxy-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
     expire_in: 30 days
     paths:
-      - storagegrid-usage-proxy_*.tar
-      - storagegrid-usage-proxy_*.tar.sha256
+      - bearer-token-api-proxy_*.tar
+      - bearer-token-api-proxy_*.tar.sha256
       - IMAGE_VERSION.txt
       - compose.yml
 

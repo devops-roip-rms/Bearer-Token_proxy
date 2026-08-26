@@ -1,271 +1,143 @@
-import importlib.util
 import json
-import pathlib
-import subprocess
-import ssl
-import sys
-import tempfile
 import threading
 import unittest
-import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from socketserver import ThreadingMixIn
 
-MODULE_PATH = pathlib.Path(__file__).resolve().parents[1] / "storagegrid_usage_proxy.py"
-spec = importlib.util.spec_from_file_location("storagegrid_usage_proxy_e2e", str(MODULE_PATH))
-mod = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = mod
-assert spec.loader
-spec.loader.exec_module(mod)
-
-
-class TestThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
-
-
-class FakeStorageGridHandler(BaseHTTPRequestHandler):
-    auth_count = 0
-    usage_count = 0
-    valid_token = None
-
-    def log_message(self, fmt, *args):
-        pass
-
-    def _json(self, status, payload):
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_POST(self):
-        if self.path != "/api/v4/authorize":
-            self._json(404, {"error": "not_found"})
-            return
-        if self.headers.get("Accept") != "application/json":
-            self._json(400, {"error": "bad_accept"})
-            return
-        if self.headers.get("Content-Type") != "application/json":
-            self._json(400, {"error": "bad_content_type"})
-            return
-
-        length = int(self.headers.get("Content-Length", "0"))
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        if payload != {
-            "accountId": "tenant-123",
-            "username": "monitoring-user",
-            "password": "secret-password",
-            "cookie": True,
-            "csrfToken": False,
-        }:
-            self._json(401, {"error": "bad_credentials_or_body"})
-            return
-
-        type(self).auth_count += 1
-        token = "TOKEN_{0}".format(type(self).auth_count)
-        type(self).valid_token = token
-        self._json(
-            200,
-            {
-                "responseTime": "2026-08-18T09:01:56.498Z",
-                "status": "success",
-                "apiVersion": "4.0",
-                "deprecated": False,
-                "data": token,
-            },
-        )
-
-    def do_GET(self):
-        if self.path != "/api/v4/org/usage":
-            self._json(404, {"error": "not_found"})
-            return
-        type(self).usage_count += 1
-        expected = "Bearer {0}".format(type(self).valid_token)
-        if self.headers.get("Authorization") != expected:
-            self._json(401, {"error": "invalid_token"})
-            return
-        self._json(200, {"data": {"objectCount": 42, "dataBytes": 2048}})
+from bearer_proxy.server import ProxyHTTPServer, build_application
+from tests.helpers import make_config, request, start_callback_server, stop_server
 
 
 class EndToEndTests(unittest.TestCase):
-    def setUp(self):
-        FakeStorageGridHandler.auth_count = 0
-        FakeStorageGridHandler.usage_count = 0
-        FakeStorageGridHandler.valid_token = None
+    def _start_proxy(self, cfg):
+        app = build_application(cfg)
+        app.token_manager.refresh(force=True)
+        server = ProxyHTTPServer(("127.0.0.1", 0), app)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+        return server, thread, app
 
-    def _write_check_config_env(self, env_file, proxy_api_key, allow_unauthenticated):
-        env_file.write_text(
-            "\n".join(
-                [
-                    "STORAGEGRID_BASE_URL=https://storagegrid.example.invalid",
-                    "STORAGEGRID_USERNAME=monitoring-user",
-                    "STORAGEGRID_ACCOUNT_ID=tenant-123",
-                    "STORAGEGRID_PASSWORD=secret-password",
-                    "AUTH_PATH=/api/v4/authorize",
-                    "USAGE_PATH=/api/v4/org/usage",
-                    "TLS_VERIFY=true",
-                    "PROXY_BIND_HOST=0.0.0.0",
-                    "PROXY_PORT=8787",
-                    "PROXY_API_KEY={0}".format(proxy_api_key),
-                    "ALLOW_UNAUTHENTICATED_NONLOOPBACK={0}".format(
-                        allow_unauthenticated
-                    ),
-                ]
+    def _stop_proxy(self, server, thread):
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    def test_json_login_profile_401_reauthentication_and_replay(self):
+        state = {"auth_count": 0, "data_requests": [], "valid_token": None}
+
+        def upstream(record, state):
+            if record["path"] == "/api/login" and record["method"] == "POST":
+                payload = json.loads(record["body"].decode("utf-8"))
+                if payload != {"username": "test-user", "password": "test-password"}:
+                    return 401, {"Content-Type": "application/json"}, b"{}"
+                state["auth_count"] += 1
+                token = "TOKEN_A" if state["auth_count"] == 1 else "TOKEN_B"
+                state["valid_token"] = token
+                return 200, {"Content-Type": "application/json"}, json.dumps({"access_token": token}).encode("utf-8")
+            if record["path"] == "/api/data" and record["method"] == "GET":
+                state["data_requests"].append(record)
+                if record["headers"].get("Authorization") != "Bearer {0}".format(state["valid_token"]):
+                    return 401, {"Content-Type": "application/json"}, b'{"error":"invalid"}'
+                return 200, {"Content-Type": "application/json"}, b'{"records":[1,2,3]}'
+            return 404, {"Content-Type": "application/json"}, b"{}"
+
+        upstream_server, upstream_thread = start_callback_server(upstream, state)
+        try:
+            base = "http://127.0.0.1:{0}".format(upstream_server.server_port)
+            cfg = make_config(
+                {
+                    "auth": {
+                        "base_url": base,
+                        "request": {
+                            "method": "POST",
+                            "path": "/api/login",
+                            "headers": {"Accept": "application/json"},
+                            "body_type": "json",
+                            "body": {
+                                "username": "test-user",
+                                "password": "test-password",
+                            },
+                        },
+                        "token": {"source": "json", "json_pointer": "/access_token", "expires_in_json_pointer": None},
+                        "validation": {"enabled": True, "method": "GET", "path": "/api/data", "expected_statuses": [200]},
+                    },
+                    "upstream": {"base_url": base, "allowed_paths": ["/api/data"]},
+                },
+                auth_base=base,
+                upstream_base=base,
             )
-            + "\n",
-            encoding="utf-8",
-        )
-
-    def _run_check_config(self, env_file):
-        return subprocess.run(
-            [sys.executable, str(MODULE_PATH), "--env-file", str(env_file), "--check-config"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            timeout=5,
-            check=False,
-        )
-
-    def test_check_config_accepts_secure_non_loopback_with_proxy_key(self):
-        with tempfile.TemporaryDirectory() as td:
-            env_file = pathlib.Path(td) / "proxy.env"
-            self._write_check_config_env(env_file, "strong-local-shared-secret", "false")
-
-            result = self._run_check_config(env_file)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("configuration_ok=yes", result.stdout)
-
-    def test_check_config_rejects_unauthenticated_non_loopback_default(self):
-        with tempfile.TemporaryDirectory() as td:
-            env_file = pathlib.Path(td) / "proxy.env"
-            self._write_check_config_env(env_file, "", "false")
-
-            result = self._run_check_config(env_file)
-
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertNotIn("configuration_ok=yes", result.stdout)
-            self.assertIn("PROXY_API_KEY is required", result.stderr)
-
-    def test_check_config_allows_explicit_unsafe_non_loopback_override(self):
-        with tempfile.TemporaryDirectory() as td:
-            env_file = pathlib.Path(td) / "proxy.env"
-            self._write_check_config_env(env_file, "", "true")
-
-            result = self._run_check_config(env_file)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("configuration_ok=yes", result.stdout)
-            self.assertIn("DANGEROUS OVERRIDE", result.stdout + result.stderr)
-
-    def test_cli_env_file_upstream_test(self):
-        upstream = TestThreadingHTTPServer(("127.0.0.1", 0), FakeStorageGridHandler)
-        upstream_thread = threading.Thread(target=upstream.serve_forever)
-        upstream_thread.daemon = True
-        upstream_thread.start()
-        try:
-            with tempfile.TemporaryDirectory() as td:
-                env_file = pathlib.Path(td) / "proxy.env"
-                env_file.write_text(
-                    "\n".join(
-                        [
-                            "STORAGEGRID_BASE_URL=http://127.0.0.1:{0}".format(upstream.server_port),
-                            "STORAGEGRID_USERNAME=monitoring-user",
-                            "STORAGEGRID_ACCOUNT_ID=tenant-123",
-                            "STORAGEGRID_PASSWORD=secret-password",
-                            "AUTH_PATH=/api/v4/authorize",
-                            "USAGE_PATH=/api/v4/org/usage",
-                            "TLS_VERIFY=true",
-                            "PROXY_BIND_HOST=127.0.0.1",
-                            "PROXY_PORT=8787",
-                        ]
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
-                result = subprocess.run(
-                    [sys.executable, str(MODULE_PATH), "--env-file", str(env_file), "--test-upstream"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True,
-                    timeout=5,
-                    check=False,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("upstream_test=ok", result.stdout)
-                self.assertIn("usage_status=200", result.stdout)
-                self.assertNotIn("TOKEN_", result.stdout + result.stderr)
-                self.assertNotIn("secret-password", result.stdout + result.stderr)
-                self.assertEqual(FakeStorageGridHandler.auth_count, 1)
+            cfg.auth.request.body = {"username": "test-user", "password": "test-password"}
+            proxy, proxy_thread, app = self._start_proxy(cfg)
+            try:
+                url = "http://127.0.0.1:{0}/proxy/api/data".format(proxy.server_port)
+                self.assertEqual(json.loads(request(url)[2].decode("utf-8"))["records"], [1, 2, 3])
+                state["valid_token"] = "SERVER_INVALIDATED_TOKEN"
+                self.assertEqual(json.loads(request(url)[2].decode("utf-8"))["records"], [1, 2, 3])
+                self.assertEqual(state["auth_count"], 2)
+                self.assertEqual(app.token_manager.get_token(), "TOKEN_B")
+                self.assertEqual(state["data_requests"][-1]["path"], "/api/data")
+            finally:
+                self._stop_proxy(proxy, proxy_thread)
         finally:
-            upstream.shutdown()
-            upstream.server_close()
-            upstream_thread.join(timeout=2)
+            stop_server(upstream_server, upstream_thread)
 
-    def test_real_http_flow_and_401_recovery(self):
-        upstream = TestThreadingHTTPServer(("127.0.0.1", 0), FakeStorageGridHandler)
-        upstream_thread = threading.Thread(target=upstream.serve_forever)
-        upstream_thread.daemon = True
-        upstream_thread.start()
+    def test_oauth_client_credentials_profile_without_python_changes(self):
+        state = {"auth_count": 0, "valid_token": None, "jobs": []}
 
-        proxy = None
-        proxy_thread = None
+        def upstream(record, state):
+            if record["path"] == "/oauth/token" and record["method"] == "POST":
+                state["auth_count"] += 1
+                token = "TOKEN_{0}".format(state["auth_count"])
+                state["valid_token"] = token
+                return 200, {"Content-Type": "application/json"}, json.dumps({"access_token": token, "expires_in": 3600}).encode("utf-8")
+            if record["path"] in ("/api/v1/data", "/api/v1/jobs", "/api/v1/plain-text"):
+                if record["headers"].get("Authorization") != "Bearer {0}".format(state["valid_token"]):
+                    return 401, {"Content-Type": "application/json"}, b'{"error":"invalid"}'
+                if record["path"] == "/api/v1/jobs":
+                    state["jobs"].append(record["body"])
+                    return 202, {"Content-Type": "application/json"}, b'{"queued":true}'
+                if record["path"] == "/api/v1/plain-text":
+                    return 200, {"Content-Type": "text/plain"}, b"plain response"
+                return 200, {"Content-Type": "application/json"}, b'{"value":1}'
+            return 404, {}, b""
+
+        upstream_server, upstream_thread = start_callback_server(upstream, state)
         try:
-            with tempfile.TemporaryDirectory() as td:
-                cfg = mod.Config(
-                    base_url="http://127.0.0.1:{0}".format(upstream.server_port),
-                    username="monitoring-user",
-                    account_id="tenant-123",
-                    password="secret-password",
-                    auth_path="/api/v4/authorize",
-                    usage_path="/api/v4/org/usage",
-                    http_timeout=2.0,
-                    max_response_bytes=1024 * 1024,
-                    tls_verify=True,
-                    ca_bundle=None,
-                    refresh_interval_seconds=10 * 3600.0,
-                    refresh_retry_seconds=300.0,
-                    bind_host="127.0.0.1",
-                    bind_port=0,
-                    proxy_api_key=None,
-                    allow_unauthenticated_nonloopback=False,
-                    log_level="INFO",
-                )
-                client = mod.StorageGridClient(cfg, ssl.create_default_context())
-                manager = mod.TokenManager(cfg, client)
-                manager.refresh(force=True)
-                self.assertEqual(manager.get_token(), "TOKEN_1")
-                self.assertEqual(FakeStorageGridHandler.auth_count, 1)
-
-                app = mod.ProxyApplication(cfg, client, manager, None)
-                proxy = mod.ProxyHTTPServer(("127.0.0.1", 0), app)
-                proxy_thread = threading.Thread(target=proxy.serve_forever)
-                proxy_thread.daemon = True
-                proxy_thread.start()
-                url = "http://127.0.0.1:{0}/storagegrid/usage".format(proxy.server_port)
-
-                with urllib.request.urlopen(url, timeout=2) as response:
-                    first = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(first["data"]["objectCount"], 42)
-                self.assertEqual(FakeStorageGridHandler.auth_count, 1)
-
-                FakeStorageGridHandler.valid_token = "SERVER_INVALIDATED_TOKEN_1"
-                with urllib.request.urlopen(url, timeout=2) as response:
-                    recovered = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(recovered["data"]["dataBytes"], 2048)
-                self.assertEqual(FakeStorageGridHandler.auth_count, 2)
-                self.assertEqual(manager.get_token(), "TOKEN_2")
+            base = "http://127.0.0.1:{0}".format(upstream_server.server_port)
+            cfg = make_config(
+                {
+                    "auth": {
+                        "base_url": base,
+                        "request": {
+                            "method": "POST",
+                            "path": "/oauth/token",
+                            "headers": {"Accept": "application/json"},
+                            "body_type": "form",
+                            "body": {"grant_type": "client_credentials", "client_id": "client", "client_secret": "secret"},
+                        },
+                        "token": {"source": "json", "json_pointer": "/access_token", "expires_in_json_pointer": "/expires_in"},
+                        "validation": {"enabled": True, "method": "GET", "path": "/api/v1/data", "expected_statuses": [200]},
+                    },
+                    "upstream": {"base_url": base, "allowed_paths": ["/api/v1/*"]},
+                },
+                auth_base=base,
+                upstream_base=base,
+            )
+            proxy, proxy_thread, app = self._start_proxy(cfg)
+            try:
+                base_url = "http://127.0.0.1:{0}".format(proxy.server_port)
+                self.assertEqual(json.loads(request(base_url + "/proxy/api/v1/data")[2].decode("utf-8"))["value"], 1)
+                status, headers, body = request(base_url + "/proxy/api/v1/jobs", method="POST", headers={"Content-Type": "application/json"}, body=b'{"job":1}')
+                self.assertEqual(status, 202)
+                self.assertEqual(state["jobs"], [b'{"job":1}'])
+                self.assertEqual(request(base_url + "/proxy/api/v1/plain-text")[2], b"plain response")
+                state["valid_token"] = "INVALIDATED"
+                self.assertEqual(json.loads(request(base_url + "/proxy/api/v1/data")[2].decode("utf-8"))["value"], 1)
+                self.assertEqual(state["auth_count"], 2)
+                self.assertEqual(app.token_manager.get_token(), "TOKEN_2")
+            finally:
+                self._stop_proxy(proxy, proxy_thread)
         finally:
-            if proxy is not None:
-                proxy.shutdown()
-                proxy.server_close()
-            if proxy_thread is not None:
-                proxy_thread.join(timeout=2)
-            upstream.shutdown()
-            upstream.server_close()
-            upstream_thread.join(timeout=2)
+            stop_server(upstream_server, upstream_thread)
 
 
 if __name__ == "__main__":

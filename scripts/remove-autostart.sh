@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-MARKER="storagegrid-usage-proxy-autostart"
+MARKER="bearer-token-api-proxy-autostart"
 if ! command -v crontab >/dev/null 2>&1; then
     echo "ERROR: crontab is not available" >&2
     exit 1

@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: storagegrid-usage-proxy
+  IMAGE_NAME: bearer-token-api-proxy
 
 jobs:
   test-python36:
@@ -139,7 +139,7 @@ jobs:
             exit 1
           fi
 
-          TAR_FILE="storagegrid-usage-proxy_${VERSION}.tar"
+          TAR_FILE="bearer-token-api-proxy_${VERSION}.tar"
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tar_file=$TAR_FILE" >> "$GITHUB_OUTPUT"
@@ -185,7 +185,7 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
           labels: |
-            org.opencontainers.image.title=StorageGRID Usage Proxy
+            org.opencontainers.image.title=Bearer Token API Proxy
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -206,10 +206,10 @@ jobs:
       - name: Upload offline image artifact
         uses: actions/upload-artifact@v7
         with:
-          name: storagegrid-usage-proxy-${{ steps.version.outputs.version }}
+          name: bearer-token-api-proxy-${{ steps.version.outputs.version }}
           path: |
-            storagegrid-usage-proxy_*.tar
-            storagegrid-usage-proxy_*.tar.sha256
+            bearer-token-api-proxy_*.tar
+            bearer-token-api-proxy_*.tar.sha256
             IMAGE_VERSION.txt
             compose.yml
           if-no-files-found: error
