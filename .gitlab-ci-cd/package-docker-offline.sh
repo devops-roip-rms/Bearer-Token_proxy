@@ -24,7 +24,7 @@ if [ -z "${IMAGE_NAME:-}" ]; then
 fi
 
 BASE_IMAGE="${BASE_IMAGE:-cr.io:5000/python:3.11-slim-bookworm}"
-TAR_FILE="storagegrid-usage-proxy_${VERSION}.tar"
+TAR_FILE="Bearer-Token-proxy_${VERSION}.tar"
 
 echo "Building Docker image:"
 echo "  Image:      ${IMAGE_NAME}:${VERSION}"

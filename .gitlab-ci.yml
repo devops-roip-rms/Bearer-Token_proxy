@@ -6,9 +6,6 @@ stages:
   - test
   - package
 
-variables:
-  IMAGE_PREFIX: <CHANGE_ME>
-
 test:python36:
   stage: test
   image: "cr.io:5000/python:3.6.15-slim-buster"
@@ -35,11 +32,11 @@ package:docker-offline:
     - sh .gitlab-ci-cd/package-docker-offline.sh
 
   artifacts:
-    name: "storagegrid-usage-proxy-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
+    name: "Bearer-Token-proxy-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
     expire_in: 30 days
     paths:
-      - storagegrid-usage-proxy_*.tar
-      - storagegrid-usage-proxy_*.tar.sha256
+      - Bearer-Token-proxy_*.tar
+      - Bearer-Token-proxy_*.tar.sha256
       - IMAGE_VERSION.txt
       - .env
       - compose.yml
