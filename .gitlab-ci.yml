@@ -6,6 +6,9 @@ stages:
   - test
   - package
 
+variables:
+  IMAGE_NAME: bearer-token_proxy
+
 test:python36:
   stage: test
   image: "cr.io:5000/python:3.6.15-slim-buster"
