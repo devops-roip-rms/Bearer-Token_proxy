@@ -17,13 +17,13 @@ WORKDIR /app
 COPY app.py /app/app.py
 COPY bearer_proxy /app/bearer_proxy
 
-RUN python3 -m py_compile /app/app.py /app/bearer_proxy/*.py \
+RUN python -m py_compile /app/app.py /app/bearer_proxy/*.py \
     && mkdir -p /app/config /app/certs
 
 EXPOSE 8787
 STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/readyz', timeout=3).read()" || exit 1
+CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/readyz', timeout=3).read()" || exit 1
 
-CMD ["python3", "/app/app.py", "--env-file", "/app/config/proxy.env", "--config-file", "/app/config/proxy.json"]
+CMD ["python", "/app/app.py", "--env-file", "/app/config/proxy.env", "--config-file", "/app/config/proxy.json"]
