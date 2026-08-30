@@ -6,7 +6,7 @@ import time
 
 from .errors import AuthenticationError, ProxyError
 
-LOG = logging.getLogger("bearer-token-api-proxy")
+LOG = logging.getLogger("bearer-token-api_proxy")
 
 
 class TokenManager(object):

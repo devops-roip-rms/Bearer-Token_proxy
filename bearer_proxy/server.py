@@ -107,8 +107,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             self._send_json(401, {"error": "unauthorized"})
             return
         try:
-            upstream_path, query = self.app.security.inbound_to_upstream(self.command, self.path)
             body = self._read_request_body()
+            upstream_path, query = self.app.security.inbound_to_upstream(self.command, self.path)
             request_headers = self.app.security.filter_request_headers(self.headers)
             response = self.app.api_client.request_with_recovery(
                 self.command,

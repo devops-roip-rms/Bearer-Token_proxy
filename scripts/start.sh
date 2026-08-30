@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-PID_FILE="$ROOT/runtime/bearer-token-api-proxy.pid"
-LOG_FILE="$ROOT/logs/bearer-token-api-proxy.log"
+PID_FILE="$ROOT/runtime/bearer-token-api_proxy.pid"
+LOG_FILE="$ROOT/logs/bearer-token-api_proxy.log"
 
 is_proxy_pid() {
     pid=$1

@@ -182,6 +182,6 @@ Offline artifacts use `docker save` with the image name `bearer-token-api-proxy`
 Current development version:
 
 ```text
-v0.1.0
+v1.1.0
 ```
 

@@ -18,7 +18,7 @@ if [[ ! "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
   exit 1
 fi
 
-TAR_FILE="bearer-token-api-proxy_${VERSION}.tar"
+TAR_FILE="bearer-token-api_proxy_${VERSION}.tar"
 
 echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 echo "tar_file=$TAR_FILE" >> "$GITHUB_OUTPUT"

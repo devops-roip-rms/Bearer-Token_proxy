@@ -23,8 +23,8 @@ if [ -z "${IMAGE_NAME:-}" ]; then
     exit 1
 fi
 
-BASE_IMAGE="${BASE_IMAGE:-cr.io:5000/python:3.11-slim-bookworm}"
-TAR_FILE="Bearer-Token-proxy_${VERSION}.tar"
+BASE_IMAGE="${BASE_IMAGE:python:3.11-slim-bookworm}"
+TAR_FILE="bearer-token-api_proxy_${VERSION}.tar"
 
 echo "Building Docker image:"
 echo "  Image:      ${IMAGE_NAME}:${VERSION}"

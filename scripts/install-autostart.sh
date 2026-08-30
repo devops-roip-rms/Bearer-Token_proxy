@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-MARKER="bearer-token-api-proxy-autostart"
+MARKER="bearer-token-api_proxy-autostart"
 
 if ! command -v crontab >/dev/null 2>&1; then
     echo "ERROR: crontab is not available on this server." >&2

@@ -1,7 +1,7 @@
 services:
-  bearer-token-api-proxy:
-    image: bearer-token-api-proxy:latest
-    container_name: bearer-token-api-proxy
+  bearer-token-api_proxy:
+    image: bearer-token-api_proxy:${IMAGE_TAG}
+    container_name: bearer-token-api_proxy
     restart: unless-stopped
 
     ports:

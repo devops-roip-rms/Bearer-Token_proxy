@@ -1,5 +1,5 @@
 # Replace __PROJECT_DIR__ during installation; see SETUP_GUIDE.md.
-__PROJECT_DIR__/logs/bearer-token-api-proxy.log {
+__PROJECT_DIR__/logs/bearer-token-api_proxy.log {
     daily
     rotate 14
     missingok

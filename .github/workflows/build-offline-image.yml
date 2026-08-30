@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: bearer-token-api-proxy
+  IMAGE_NAME: bearer-token-api_proxy
 
 jobs:
   test-python36:
@@ -132,10 +132,10 @@ jobs:
       - name: Upload offline image artifact
         uses: actions/upload-artifact@v7
         with:
-          name: bearer-token-api-proxy-${{ steps.version.outputs.version }}
+          name: bearer-token-api_proxy-${{ steps.version.outputs.version }}
           path: |
-            bearer-token-api-proxy_*.tar
-            bearer-token-api-proxy_*.tar.sha256
+            bearer-token-api_proxy_*.tar
+            bearer-token-api_proxy_*.tar.sha256
             IMAGE_VERSION.txt
             .env
             compose.yml
